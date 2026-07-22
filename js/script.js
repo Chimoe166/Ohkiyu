@@ -95,18 +95,27 @@
         }
     }
 
-    async function fetchResearchmap(endpoint) {
+    async function fetchResearchmap(endpoint, retries = 2) {
         const cacheKey = `researchmap_${RESEARCHMAP_ID}_${endpoint}`;
         const cached = getCache(cacheKey);
         if (cached) return cached;
 
         const url = `${API_BASE_URL}${encodeURIComponent(RESEARCHMAP_ID)}/${endpoint}?limit=100`;
-        const response = await fetch(url, { headers: { Accept: "application/json" } });
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
 
-        const data = await response.json();
-        setCache(cacheKey, data);
-        return data;
+        for (let attempt = 0; ; attempt++) {
+            try {
+                const response = await fetch(url, { headers: { Accept: "application/json" } });
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
+
+                const data = await response.json();
+                setCache(cacheKey, data);
+                return data;
+            } catch (error) {
+                if (attempt >= retries) throw error;
+                // APIが一時的に500を返すことがあるため、少し待ってから再試行する。
+                await new Promise((resolve) => setTimeout(resolve, 1000 * (attempt + 1)));
+            }
+        }
     }
 
     function firstIdentifier(item, key) {
@@ -242,9 +251,12 @@
         }).join("");
         }
 
-    function renderError(containerId, label, error) {
-        const container = document.getElementById(containerId);
-        container.innerHTML = `<p class="rm-status rm-error">${escapeHtml(label)} could not be loaded. Please view the records on Researchmap.</p>`;
+    function renderError(containerIds, label, error) {
+        for (const containerId of containerIds) {
+            const container = document.getElementById(containerId);
+            if (!container) continue;
+            container.innerHTML = `<p class="rm-status rm-error">${escapeHtml(label)} could not be loaded. Please view the records on Researchmap.</p>`;
+        }
         console.error(`Researchmap ${label} error:`, error);
     }
 
@@ -258,7 +270,8 @@
             if (document.getElementById("rm-all-presentations")) {
                 renderPresentations(data, "rm-all-presentations");
             }
-        });
+        })
+        .catch(error => renderError(["rm-presentations", "rm-all-presentations"], "Presentations", error));
 
     fetchResearchmap("published_papers")
         .then(data => {
@@ -270,7 +283,8 @@
             if (document.getElementById("rm-all-publications")) {
                 renderPublications(data, "rm-all-publications");
             }
-        });
+        })
+        .catch(error => renderError(["rm-publications", "rm-all-publications"], "Publications", error));
 })();
 
 
